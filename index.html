@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CPU Scheduling Simulator</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--card:#f4f4f0;--bd:#d6d6cf;--ac:#2f5d9e;--idle:#e4e4de;--err:#a32020;--ok:#1d6b3a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17181a;--fg:#ececea;--mut:#a3a39d;--card:#222426;--bd:#3b3d40;--ac:#8db4ec;--idle:#2d2f31;--err:#ff8f8f;--ok:#7fd49b;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#17181a;--fg:#ececea;--mut:#a3a39d;--card:#222426;--bd:#3b3d40;--ac:#8db4ec;--idle:#2d2f31;--err:#ff8f8f;--ok:#7fd49b;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+h1{font-size:1.35rem;margin:.2em 0}h2{font-size:1.05rem;margin:1.2em 0 .4em}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px;margin:10px 0}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+input,select,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:5px 8px}
+input[type=number]{width:80px}input.id{width:80px}
+button{cursor:pointer}button.pri{background:var(--ac);color:var(--bg);border-color:var(--ac)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid var(--bd);padding:4px 8px;text-align:right}th{background:var(--card)}td:first-child,th:first-child{text-align:left}
+#gantt{display:flex;min-width:520px;margin-top:6px}
+.blk{position:relative;min-width:30px;height:44px;margin-right:2px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-weight:600;color:#111}
+.blk.idle{background:repeating-linear-gradient(45deg,var(--idle),var(--idle) 6px,var(--bg) 6px,var(--bg) 9px);color:var(--mut);font-weight:400;border:1px dashed var(--bd)}
+.blk span{position:absolute;top:46px;left:-4px;font-size:.75rem;color:var(--mut);font-weight:400}
+.blk span.end{left:auto;right:-4px}
+.err{color:var(--err);border-color:var(--err)}.ok{color:var(--ok)}
+.mut{color:var(--mut);font-size:.85rem}ul{margin:.3em 0;padding-left:1.2em}
+</style></head><body><main>
+<h1>CPU Scheduling Simulator</h1>
+<p class="mut">One CPU, single burst per process, no I/O, zero-cost context switches. Models scheduling policies only; it does not reproduce a real OS scheduler.</p>
+<div class="card">
+<h2 style="margin-top:0">Processes</h2>
+<div class="scroll"><table><thead><tr><th>ID</th><th>Arrival</th><th>CPU burst</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="row" style="margin-top:8px">
+<button id="add">Add process</button>
+<label>Load example <select id="ex"><option value="">choose…</option><option value="A">Workload A</option><option value="B">Workload B</option><option value="C">Test C: idle time</option><option value="D">Test D: tie</option><option value="E">Test E: SRTF preemption</option></select></label>
+</div></div>
+<div class="card row">
+<label>Algorithm <select id="algo"><option>FCFS</option><option>SJF</option><option>SRTF</option><option>RR</option></select></label>
+<label id="qw">Quantum <input type="number" id="q" value="2" min="1" step="1"></label>
+<button class="pri" id="run">Run simulation</button>
+</div>
+<div id="out"></div>
+<script>
+//SIM-START
+function simulate(P,algo,q){
+ const n=P.length,rem=P.map(p=>p.burst),fin=Array(n).fill(null),st=Array(n).fill(null),segs=[];
+ let t=0,done=0;
+ const add=(i,s,e,merge)=>{const id=i<0?null:P[i].id,l=segs[segs.length-1];
+  if(merge&&l&&l.id===id&&l.e===s)l.e=e;else segs.push({id,s,e});};
+ const cmp=(a,b)=>P[a].arrival-P[b].arrival||a-b;
+ const nextArr=()=>Math.min(...P.map((p,i)=>fin[i]===null?p.arrival:Infinity));
+ const ready=()=>P.map((_,i)=>i).filter(i=>fin[i]===null&&P[i].arrival<=t);
+ if(algo==="FCFS"||algo==="SJF"){
+  while(done<n){
+   const r=ready();
+   if(!r.length){const na=nextArr();add(-1,t,na,true);t=na;continue;}
+   r.sort(algo==="FCFS"?cmp:(a,b)=>P[a].burst-P[b].burst||cmp(a,b));
+   const i=r[0];st[i]=t;add(i,t,t+P[i].burst);t+=P[i].burst;fin[i]=t;rem[i]=0;done++;
+  }
+ }else if(algo==="SRTF"){
+  let cur=-1;
+  while(done<n){
+   const r=ready();
+   if(!r.length){cur=-1;const na=nextArr();add(-1,t,na,true);t=na;continue;}
+   r.sort((a,b)=>rem[a]-rem[b]||cmp(a,b));
+   let b=r[0];
+   if(cur>=0&&fin[cur]===null&&rem[cur]<=rem[b])b=cur; // keep current unless strictly shorter exists
+   cur=b;if(st[b]===null)st[b]=t;
+   add(b,t,t+1,true);t++;rem[b]--;if(!rem[b]){fin[b]=t;done++;}
+  }
+ }else{
+  const order=P.map((_,i)=>i).sort(cmp);let ptr=0;const Q=[];
+  const admit=()=>{while(ptr<n&&P[order[ptr]].arrival<=t)Q.push(order[ptr++]);};
+  while(done<n){
+   admit();
+   if(!Q.length){const na=P[order[ptr]].arrival;add(-1,t,na,true);t=na;continue;}
+   const i=Q.shift();if(st[i]===null)st[i]=t;
+   const r=Math.min(q,rem[i]);add(i,t,t+r);t+=r;rem[i]-=r;
+   admit(); // arrivals at the boundary join before the preempted process
+   if(rem[i])Q.push(i);else{fin[i]=t;done++;}
+  }
+ }
+ const rows=P.map((p,i)=>{const tat=fin[i]-p.arrival;return{id:p.id,arrival:p.arrival,burst:p.burst,start:st[i],fin:fin[i],tat,wt:tat-p.burst,rt:st[i]-p.arrival};});
+ return{segs,rows};
+}
+function checks(P,res){
+ const out=[],{segs,rows}=res;
+ const got={};segs.forEach(s=>{if(s.id!==null)got[s.id]=(got[s.id]||0)+s.e-s.s;});
+ out.push(["Every process gets exactly its burst",P.every(p=>got[p.id]===p.burst)]);
+ out.push(["No process runs before its arrival",segs.every(s=>s.id===null||s.s>=P.find(p=>p.id===s.id).arrival)]);
+ out.push(["No overlap, no gaps in the timeline",segs.every((s,i)=>s.e>s.s&&(i===0?s.s===0:s.s===segs[i-1].e))]);
+ out.push(["Waiting and response times are nonnegative",rows.every(r=>r.wt>=0&&r.rt>=0)]);
+ out.push(["CPU never idle while a process is ready",segs.every(s=>s.id!==null||rows.every(r=>!(r.arrival<s.e&&r.fin>s.s)))]);
+ return out;
+}
+//SIM-END
+const EX={A:[["P1",0,8],["P2",1,4],["P3",2,2],["P4",4,1]],B:[["P1",2,3],["P2",2,1],["P3",8,2],["P4",9,1]],C:[["P1",1,2],["P2",6,3]],D:[["P3",0,3],["P1",0,3],["P2",0,1]],E:[["P1",0,7],["P2",2,2],["P3",3,1]]};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let rows=EX.A.map(r=>r.slice());
+function draw(){
+ $("#rows").innerHTML=rows.map((r,i)=>`<tr><td><input class="id" data-i="${i}" data-k="0" value="${esc(r[0])}"></td><td><input type="number" data-i="${i}" data-k="1" value="${esc(r[1])}"></td><td><input type="number" data-i="${i}" data-k="2" value="${esc(r[2])}"></td><td><button data-del="${i}">Remove</button></td></tr>`).join("");
+}
+$("#rows").addEventListener("input",e=>{const t=e.target;if(t.dataset.i!==undefined)rows[+t.dataset.i][+t.dataset.k]=t.value;});
+$("#rows").addEventListener("click",e=>{if(e.target.dataset.del!==undefined){rows.splice(+e.target.dataset.del,1);draw();}});
+$("#add").onclick=()=>{rows.push(["P"+(rows.length+1),"0","1"]);draw();};
+$("#ex").onchange=e=>{if(EX[e.target.value]){rows=EX[e.target.value].map(r=>r.slice());draw();run();}};
+$("#algo").onchange=()=>{$("#qw").style.display=$("#algo").value==="RR"?"":"none";};
+$("#run").onclick=run;
+function run(){
+ const errs=[],P=[],seen=new Set(),isInt=v=>/^-?\d+$/.test(String(v).trim());
+ if(!rows.length)errs.push("Add at least one process.");
+ rows.forEach((r,i)=>{const id=String(r[0]).trim(),n=`Row ${i+1}`;
+  if(!id)errs.push(`${n}: ID must not be empty.`);else if(seen.has(id))errs.push(`${n}: ID “${id}” is duplicated; IDs must be unique.`);seen.add(id);
+  if(!isInt(r[1])||+r[1]<0)errs.push(`${n}: arrival time must be a nonnegative integer.`);
+  if(!isInt(r[2])||+r[2]<1)errs.push(`${n}: CPU burst must be a positive integer.`);
+  P.push({id,arrival:+r[1],burst:+r[2]});});
+ const algo=$("#algo").value;
+ if(algo==="RR"&&(!isInt($("#q").value)||+$("#q").value<1))errs.push("Quantum must be a positive integer.");
+ if(errs.length){$("#out").innerHTML=`<div class="card err"><b>Invalid input</b><ul>${errs.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;return;}
+ const q=+$("#q").value,res=simulate(P,algo,q),ids=P.map(p=>p.id);
+ const col=id=>`hsl(${(ids.indexOf(id)*67+200)%360} 60% 68%)`;
+ const T=res.segs[res.segs.length-1].e;
+ const g=res.segs.map((s,i)=>`<div class="blk${s.id===null?" idle":""}" style="flex:${s.e-s.s};${s.id===null?"":"background:"+col(s.id)}">${s.id===null?"idle":esc(s.id)}<span>${s.s}</span>${i===res.segs.length-1?`<span class="end">${s.e}</span>`:""}</div>`).join("");
+ const avg=k=>(res.rows.reduce((a,r)=>a+r[k],0)/res.rows.length).toFixed(2);
+ const ck=checks(P,res);
+ $("#out").innerHTML=`<h2>Gantt chart — ${algo}${algo==="RR"?`, quantum ${q}`:""}</h2>
+ <div class="card scroll"><div id="gantt" style="padding-bottom:22px">${g}</div><div class="mut">Time 0 to ${T}. Each box is one uninterrupted run${algo==="RR"?"; in Round Robin every box is one quantum slice, so consecutive slices of the same process stay separate":""}. Intervals are [start, end).</div></div>
+ <h2>Results</h2><div class="scroll"><table><thead><tr><th>ID</th><th>Arrival</th><th>Burst</th><th>First start</th><th>Completion</th><th>Turnaround</th><th>Waiting</th><th>Response</th></tr></thead><tbody>${res.rows.map(r=>`<tr><td>${esc(r.id)}</td><td>${r.arrival}</td><td>${r.burst}</td><td>${r.start}</td><td>${r.fin}</td><td>${r.tat}</td><td>${r.wt}</td><td>${r.rt}</td></tr>`).join("")}<tr><th colspan="5">Average</th><th>${avg("tat")}</th><th>${avg("wt")}</th><th>${avg("rt")}</th></tr></tbody></table></div>
+ <h2>Self-checks</h2><div class="card"><ul>${ck.map(c=>`<li class="${c[1]?"ok":"err"}">${c[1]?"✓":"✗"} ${c[0]}</li>`).join("")}</ul></div>`;
+}
+draw();$("#qw").style.display="none";run();
+</script></main></body></html>
